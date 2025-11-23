@@ -105,19 +105,11 @@ async def parse_1040(file: UploadFile = File(...)):
     # Check if we got all fields
     if len(fields) < 3:
         return ParseResponse(success=False, error="Could not parse all required fields")
-    
-    # Validate the math: line 11 should equal line 9 - line 10
-    is_valid = Form1040Fields.validate_totals(
-        fields['line_9'],
-        fields['line_10'],
-        fields['line_11']
-    )
-    
+
     form_fields = Form1040Fields(
         line_9=fields['line_9'],
         line_10=fields['line_10'],
-        line_11=fields['line_11'],
-        is_valid=is_valid
+        line_11=fields['line_11']
     )
     
     return ParseResponse(success=True, fields=form_fields)

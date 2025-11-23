@@ -19,7 +19,7 @@ def load_fixture(filename):
 class TestParse1040:
     """End-to-end tests for the 1040 parser"""
     
-    @patch('app.textract_helper.boto3.client')
+    @patch('app.field_extractors.textract_field_extractor.boto3.client')
     def test_parse_valid_1040(self, mock_boto_client):
         """Test parsing a valid 1040 with correct math"""
         # Setup mock
@@ -57,7 +57,7 @@ class TestParse1040:
         call_args = mock_textract.analyze_document.call_args
         assert call_args[1]['FeatureTypes'] == ['FORMS']
     
-    @patch('app.textract_helper.boto3.client')
+    @patch('app.field_extractors.textract_field_extractor.boto3.client')
     def test_parse_invalid_1040_math(self, mock_boto_client):
         """Test parsing a 1040 where the math doesn't add up"""
         # Setup mock with invalid totals

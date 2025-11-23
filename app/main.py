@@ -1,6 +1,7 @@
 from fastapi import FastAPI, File, UploadFile
-from app.models import ParseResponse, Form1040Fields
-from app.textract_helper import analyze_1040
+
+from app.models import ParseResponse
+from app.field_extractors.textract_field_extractor import TextractFieldExtractor
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,86 +35,16 @@ async def parse_1040(file: UploadFile = File(...)):
         doc_bytes = await file.read()
     except Exception as e:
         return ParseResponse(success=False, error=f"Error reading file: {str(e)}")
-    
+
+    fields_extractor = TextractFieldExtractor()
     try:
-        textract_response = analyze_1040(doc_bytes)
+        blocks = fields_extractor.extract_pdf_blocks(doc_bytes)
+        fields = await fields_extractor.extract_1040_fields(blocks)
     except Exception as e:
-        return ParseResponse(success=False, error=f"Textract error: {str(e)}")
-    
-    fields = {}
-    blocks = textract_response.get('Blocks', [])
-    
-    # Look for key value pairs
-    for block in blocks:
-        if block['BlockType'] == 'KEY_VALUE_SET' and 'KEY' in block.get('EntityTypes', []):
-            # Get the key text
-            key_text = ''
-            if 'Relationships' in block:
-                for relationship in block['Relationships']:
-                    if relationship['Type'] == 'CHILD':
-                        for child_id in relationship['Ids']:
-                            for b in blocks:
-                                if b['Id'] == child_id and b['BlockType'] == 'WORD':
-                                    key_text += b.get('Text', '') + ' '
-            
-            key_text = key_text.strip().lower()
-            
-            # Find the corresponding value
-            value_text = ''
-            if 'Relationships' in block:
-                for relationship in block['Relationships']:
-                    if relationship['Type'] == 'VALUE':
-                        for value_id in relationship['Ids']:
-                            for value_block in blocks:
-                                if value_block['Id'] == value_id:
-                                    if 'Relationships' in value_block:
-                                        for vrel in value_block['Relationships']:
-                                            if vrel['Type'] == 'CHILD':
-                                                for vid in vrel['Ids']:
-                                                    for vb in blocks:
-                                                        if vb['Id'] == vid and vb['BlockType'] == 'WORD':
-                                                            value_text += vb.get('Text', '') + ' '
-            
-            value_text = value_text.strip()
-            
-            # Skip if no value
-            if not value_text:
-                continue
-            
-            # Line 9: Total income
-            if (key_text.startswith('9 ') and 'total' in key_text and 'income' in key_text) or \
-               ('9 add lines' in key_text):
-                try:
-                    fields['line_9'] = float(value_text.replace(',', '').replace('$', '').replace('.', ''))
-                except:
-                    pass
-            # Line 10: Adjustments to income
-            elif (key_text.startswith('10 ') and 'adjustment' in key_text) or \
-                 (key_text.endswith(' 10') and 'adjustment' in key_text):
-                try:
-                    fields['line_10'] = float(value_text.replace(',', '').replace('$', '').replace('.', ''))
-                except:
-                    pass
-            # Line 11: Adjusted gross income (AGI)
-            elif (key_text.startswith('11 ') and 'subtract' in key_text) or \
-                 (key_text.endswith(' 11') and 'adjusted gross income' in key_text):
-                try:
-                    fields['line_11'] = float(value_text.replace(',', '').replace('$', '').replace('.', ''))
-                except:
-                    pass
-    
-    # Check if we got all fields
-    if len(fields) < 3:
+        return ParseResponse(success=False, error=f"Extract error: {str(e)}")
+    if fields is None:
         return ParseResponse(success=False, error="Could not parse all required fields")
-
-    form_fields = Form1040Fields(
-        line_9=fields['line_9'],
-        line_10=fields['line_10'],
-        line_11=fields['line_11']
-    )
-    
-    return ParseResponse(success=True, fields=form_fields)
-
+    return ParseResponse(success=True, fields=fields)
 
 if __name__ == "__main__":
     import uvicorn

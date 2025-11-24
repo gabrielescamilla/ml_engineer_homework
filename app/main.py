@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile
 
+from app.field_extractors.gpt_field_extractor import GPTExtractor
 from app.models import ParseResponse
 from app.field_extractors.textract_field_extractor import TextractFieldExtractor
 from dotenv import load_dotenv
@@ -37,14 +38,22 @@ async def parse_1040(file: UploadFile = File(...)):
         return ParseResponse(success=False, error=f"Error reading file: {str(e)}")
 
     fields_extractor = TextractFieldExtractor()
+    strategy = "textract"
     try:
         blocks = fields_extractor.extract_pdf_blocks(doc_bytes)
         fields = await fields_extractor.extract_1040_fields(blocks)
     except Exception as e:
-        return ParseResponse(success=False, error=f"Extract error: {str(e)}")
+        strategy = "vlm"
+        fields_extractor = GPTExtractor()
+        try:
+            blocks = fields_extractor.extract_pdf_blocks(doc_bytes)
+            fields = await fields_extractor.extract_1040_fields(blocks)
+        except Exception as e:
+            return ParseResponse(success=False, error=f"Extract error: {str(e)}")
     if fields is None:
         return ParseResponse(success=False, error="Could not parse all required fields")
-    return ParseResponse(success=True, fields=fields)
+
+    return ParseResponse(success=True, fields=fields, strategy=strategy)
 
 if __name__ == "__main__":
     import uvicorn

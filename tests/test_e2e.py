@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 from io import BytesIO
 
+from app.field_extractors.textract_field_extractor import TextractFieldExtractor
 from app.main import app
 
 client = TestClient(app)
@@ -48,7 +49,10 @@ class TestParse1040:
         assert fields['line_9'] == 280300.0
         assert fields['line_10'] == 9631.0
         assert fields['line_11'] == 270669.0
-        
+        assert fields['line_12'] == 27800.0
+        assert fields['line_13'] == 0.0
+        assert fields['line_14'] == 27800.0
+
         # Check validation: line 11 should equal line 9 - line 10
         assert fields['is_valid'] is True
         
@@ -63,7 +67,7 @@ class TestParse1040:
         # Setup mock with invalid totals
         mock_textract = MagicMock()
         mock_boto_client.return_value = mock_textract
-        mock_textract.analyze_document.return_value = load_fixture('sample_1040_invalid.json')
+        mock_textract.analyze_document.return_value = load_fixture('2024_samuel_singletary_invalid.json')
         
         # Create a fake PDF file for upload
         dummy_doc = b"fake pdf content"
@@ -114,3 +118,52 @@ class TestParse1040:
         assert 'error' in data
         assert 'PDF' in data['error'] or 'pdf' in data['error']
 
+    @patch('app.field_extractors.gpt_field_extractor.OpenAI')
+    @patch.object(TextractFieldExtractor, 'extract_pdf_blocks')
+    def test_parse_valid_1040_gpt(self, mock_extract, mock_openai):
+        mock_extract.side_effect = Exception("Textract should not be called when using GPT")
+        fake_response = MagicMock()
+        fake_choice = MagicMock()
+        fake_message = MagicMock()
+        fake_message.content = "```json\n{\n\"line_9\": \"280300\",\n\"line_10\": \"9631\",\n\"line_11\": \"270669\",\n\"line_12\": \"27800\",\n\"line_13\": null,\n\"line_14\": \"27800\"\n}\n```"
+        fake_choice.message = fake_message
+        fake_response.choices = [fake_choice]
+        # setup mock
+        mock_client = MagicMock()
+        mock_chat = MagicMock()
+        mock_completions = MagicMock()
+        mock_openai.return_value = mock_client
+        mock_client.chat = mock_chat
+        mock_chat.completions = mock_completions
+        mock_completions.create.return_value = fake_response
+
+        # Create a fake PDF file for upload
+        dummy_doc = b"fake pdf content"
+        file_data = BytesIO(dummy_doc)
+
+        # Make request with file upload
+        response = client.post(
+            "/parse-1040",
+            files={"file": ("test_1040.pdf", file_data, "application/pdf")}
+        )
+
+        # Assertions
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert data['fields'] is not None
+
+        # Check parsed values from openai response
+        fields = data['fields']
+        assert fields['line_9'] == 280300.0
+        assert fields['line_10'] == 9631.0
+        assert fields['line_11'] == 270669.0
+        assert fields['line_12'] == 27800.0
+        assert fields['line_13'] == 0.0
+        assert fields['line_14'] == 27800.0
+
+        # Check validation: line 11 should equal line 9 - line 10
+        assert fields['is_valid'] is True
+
+        # Verify Openai was called
+        mock_openai.assert_called_once()
